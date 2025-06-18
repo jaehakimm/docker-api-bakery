@@ -4,6 +4,18 @@ import joblib
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI()
+
+# ให้ frontend จากทุก origin เรียกได้ (ใช้ตอน dev เท่านั้น ปรับเฉพาะ domain จริงตอน production)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # หรือเฉพาะ domain เช่น ["https://yourdomain.com"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 try:
     model = joblib.load("single_model.pkl")
