@@ -25,8 +25,6 @@ except FileNotFoundError:
     model = None
     le = None
 
-app = FastAPI()
-
 # สร้าง Pydantic model สำหรับ Input
 class PredictionInput(BaseModel):
     menu_name: str
