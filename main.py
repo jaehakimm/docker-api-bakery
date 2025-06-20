@@ -1,57 +1,68 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import joblib
 import pandas as pd
-import numpy as np
-from sklearn.preprocessing import LabelEncoder
+import os
+
+# สร้างแอป FastAPI
+app = FastAPI()
+
+# เปิดใช้งาน CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # หรือระบุ domain ที่อนุญาต เช่น ["http://localhost:3000"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# โหลดโมเดลและ encoder ล่วงหน้า
+model_path = "single_model_V2.pkl"
+encoder_path = "menu_encoder_V2.pkl"
+
 
 try:
-    model = joblib.load("single_model.pkl")
-    le = joblib.load("menu_encoder.pkl")
+    model = joblib.load(model_path)
+    le = joblib.load(encoder_path)
 except FileNotFoundError:
-    print("⚠️ ไม่พบไฟล์โมเดลหรือ encoder กรุณาตรวจสอบ path และรันโค้ดส่วนเทรนโมเดลก่อน")
     model = None
     le = None
 
-app = FastAPI()
-
-# สร้าง Pydantic model สำหรับ Input
-class PredictionInput(BaseModel):
+# สร้าง Pydantic Model สำหรับรับ input
+class PredictionRequest(BaseModel):
     menu_name: str
-    last_day_quantity: int
-    today_day_of_week: int # 0=จันทร์, 6=อาทิตย์
+    prev_day_sales: int
+    day_of_week: int  # 0=จันทร์, ..., 6=อาทิตย์
 
-@app.get("/")
-def read_root():
-    return {"message": "FastAPI Bakery Prediction API"}
-
-@app.post("/predict/")
-def predict_sales(input: PredictionInput):
+# Endpoint สำหรับทำนาย
+@app.post("/predict")
+def predict(request: PredictionRequest):
     if model is None or le is None:
-        return {"error": "Model or encoder not loaded. Please train the model first."}
+        raise HTTPException(status_code=500, detail="❌ ไม่พบไฟล์โมเดลหรือ encoder กรุณาตรวจสอบ path ที่กำหนด")
 
+    # ตรวจสอบค่า day_of_week
+    if request.day_of_week not in range(7):
+        raise HTTPException(status_code=400, detail="❌ กรุณาระบุเลขวันให้ถูกต้อง (0=จันทร์, ..., 6=อาทิตย์)")
+
+    # ตรวจสอบว่าเมนูมีอยู่จริงหรือไม่
     try:
-        # เตรียมข้อมูลสำหรับ predict
-        next_dow = (input.today_day_of_week + 1) % 7
-        is_weekend = int(next_dow in [5, 6])
+        menu_encoded = le.transform([request.menu_name])[0]
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"❌ เมนู '{request.menu_name}' ยังไม่มีในระบบ")
 
-        # ตรวจสอบว่า menu_name อยู่ใน classes ของ encoder หรือไม่
-        if input.menu_name not in le.classes_:
-             return {"error": f"Menu '{input.menu_name}' not found in trained data."}
+    # เตรียมข้อมูลสำหรับทำนาย
+    is_weekend = int(request.day_of_week in [5, 6])
+    X_next = pd.DataFrame([{
+        'day_of_week': request.day_of_week,
+        'is_weekend': is_weekend,
+        'prev_day_sales': request.prev_day_sales,
+        'menu_encoded': menu_encoded
+    }])
 
-        menu_encoded = le.transform([input.menu_name])[0]
-
-        X_next = pd.DataFrame([{
-            'day_of_week': next_dow,
-            'is_weekend': is_weekend,
-            'prev_day_sales': input.last_day_quantity,
-            'menu_encoded': menu_encoded
-        }])
-
-        # ทำนาย
-        prediction = round(model.predict(X_next)[0])
-
-        return {"predicted_quantity": max(0, int(prediction))} # ให้ค่าไม่ติดลบ
-
-    except Exception as e:
-        return {"error": str(e)}
+    # ทำนายผล
+    predicted = round(model.predict(X_next)[0])
+    return {
+        "message": f"✅ พรุ่งนี้ควรผลิต '{request.menu_name}' ประมาณ {predicted} ชิ้น",
+        "predicted_quantity": predicted
+    }
