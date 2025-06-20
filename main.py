@@ -21,7 +21,6 @@ app.add_middleware(
 model_path = "single_model_V2.pkl"
 encoder_path = "menu_encoder_V2.pkl"
 
-
 try:
     model = joblib.load(model_path)
     le = joblib.load(encoder_path)
